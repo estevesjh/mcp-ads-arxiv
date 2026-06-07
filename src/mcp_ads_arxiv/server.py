@@ -46,12 +46,20 @@ async def search_ads(query: str, rows: int = 40) -> dict[str, Any]:
 @mcp.tool
 async def related_papers(bibcode: str, mode: str = "references", topic: str | None = None,
                          rows: int = 40) -> dict[str, Any]:
-    """Relate other works to a specific paper via the ADS citation graph.
+    """Citation-graph traversal via NASA ADS. PREFER THIS over reading the paper's `.tex`
+    bibliography when the user asks about cited work — the result includes title + abstract +
+    keywords for each match, so you can judge topical relevance directly.
 
-    mode='references' -> the paper's own bibliography (backward; often the project's ROOTS).
-    mode='citations'  -> papers that cite it (forward; impact / what came after).
-    mode='similar'    -> topically adjacent papers.
-    Optional `topic` narrows the graph (e.g. 'dark matter'). Metadata only; cached."""
+    Use this tool whenever the question is "which references / citations of paper X are about
+    Y?" — pass `topic="Y"` and ADS narrows the graph for you.
+
+    mode='references' -> the paper's own bibliography (backward; foundations / methodology
+                         roots). USE THIS for "citations relevant to its methodology /
+                         halo model / sample selection / etc."
+    mode='citations'  -> papers that cite this one (forward; impact / what came after).
+    mode='similar'    -> topically adjacent papers (not directly linked in the graph).
+
+    Returns metadata only — feed the result into generate_dynamic_survey for >~10 hits."""
     try:
         papers = await ads.related(bibcode, mode, topic=topic, rows=rows)
     except ads.ADSTokenMissing:

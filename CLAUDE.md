@@ -28,13 +28,46 @@ Always prefer local, free lookups before the network:
 
 (MCP has no GUI form — the survey is conversational: present the 4+4, then wait for the reply.)
 
-## Relating works to a paper
-When the user wants works related to a specific paper, use `related_papers(bibcode, mode)`:
-- **`references`** (backward) — the paper's own bibliography; often the **roots** of a project.
-  Use when tracing foundations or "what is this built on".
-- **`citations`** (forward) — newer work citing it; use for "impact / what came after".
-- **`similar`** — topically adjacent papers.
-Add a `topic` term to focus the graph, then run the survey over the results.
+## Citations & references — direction matters, ask when ambiguous
+
+NASA ADS distinguishes two directions cleanly (and `related_papers(mode=...)` mirrors them):
+- **`references`** = papers cited BY this paper (its bibliography; backward).
+- **`citations`** = papers that CITE this paper (forward; what came after).
+- **`similar`** = topically adjacent (no direct graph edge).
+
+But everyday English is ambiguous: *"the citations of this paper"* can mean either. **Do not
+silently pick one direction.** Apply this routing logic in order:
+
+1. **Unambiguous phrasing → route directly.**
+   - "What does this paper cite about X" / "the references for its methodology / halo model" /
+     "what is this built on" → `mode="references"`, with `topic="X"` if the user named one.
+   - "What papers cite this one" / "who built on this" / "impact / what came after" →
+     `mode="citations"`.
+   - "Papers similar to this" → `mode="similar"`.
+
+2. **Ambiguous phrasing → ask one short question OR return both.**
+   *"the citations of this paper"*, *"its citations"*, *"citing papers"* without further
+   context: ask the user "ADS-references (the paper's bibliography) or ADS-citations (papers
+   citing it)?" — or, if the result will fit, call both modes and label them clearly. **Do not
+   guess.**
+
+3. **Topic-filtered methodology questions are usually `references`.** "Methodology / halo
+   model / sample selection / instrument calibration" point at *the foundations the paper is
+   built on*, which lives in its bibliography — but say so explicitly when you choose, e.g.
+   *"interpreting this as the paper's bibliography filtered by topic; tell me if you wanted
+   forward citers instead."*
+
+**Tool selection:**
+- Topical / abstract-level reasoning about cited work → `related_papers` (returns title +
+  abstract + keywords; lets you actually judge relevance).
+- Where in the body a `\cite{key}` appears → `read_paper(sections=...)` and grep the returned
+  text. Combine the two when the user wants both ("which methodology refs, AND where in §2").
+
+**Never grep the `.tex` bibliography to answer a topical-relevance question** — the bibliography
+has only titles, so any judgment from it is a guess. ADS has the abstracts.
+
+After `related_papers`, run `generate_dynamic_survey` for >~10 hits and present focus/exclude
+options before reading any full text.
 
 ## Acquisition order (handled by get_paper)
 1. arXiv LaTeX source (preferred — equations and structure intact).

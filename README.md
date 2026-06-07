@@ -31,6 +31,110 @@ Built for literature reviewers who want a fast, token-frugal, reusable local cor
 | `read_paper` | Serve stored text; optional `sections` to save tokens. |
 | `ingest_inbox` | Convert PDFs dropped in `inbox/` to markdown. |
 
+## Talking to the tool: prompt cookbook
+
+You don't call these tools yourself — you ask Claude in plain English, and the directives in
+`CLAUDE.md` route the request. The phrasings below are battle-tested; copy them, adapt the
+identifier/topic, and Claude will pick the right tool path.
+
+### Discover papers
+
+- *"Search ADS for galaxy cluster mass calibration with weak lensing, last 5 years."*
+- *"Find papers on tree-ring distortions in CCD photometry."*
+- *"Look for papers I already have on [topic] before going to ADS."* — forces local-first.
+
+### Acquire a paper into the library
+
+- *"Get paper 2023PASP..135k5003E."* (ADS bibcode)
+- *"Acquire arXiv 2308.00919 into the library."*
+- *"Download Esteves et al. 2023 PASP photometry paper."* — Claude resolves via ADS first.
+- *"Get a PDF I can read for [paper]."* — runs `fetch_pdf` for human reading too.
+
+### Save papers to *this* project folder
+
+By default, every paper goes to one global library so search stays unified. To also drop a
+shortcut into the current project folder, **tell the server which folder is "this project"**:
+
+- *"Set the project directory to the current folder."* — call once at the start of a session;
+  Claude should pass its `cwd` to `set_project_dir`.
+- *"Use `/abs/path/to/myproject` as my project folder for this session."*
+
+After that, every `get_paper` automatically creates two symlinks under `<project>/papers/`:
+- `<bibcode>/` → the source directory in the global library
+- `<FirstAuthorLastNameYear>.pdf` → the PDF for human reading (e.g. `Esteves2023.pdf`)
+
+The originals stay in the global library — no data duplication.
+
+- *"Show me what's been linked into this project."* → `library_status`
+- *"Stop tracking [paper] in this project."* → `unlink_paper` (the global copy stays)
+
+### Read a paper without burning tokens
+
+- *"Read just the **Methodology** and **Results** of [paper]."* — sectioned, ~10× cheaper.
+- *"Show me the **Tree-rings** section of 2023PASP..135k5003E."*
+- *"List the section headings of [paper] before reading anything."*
+- *"Read the full text of [paper]."* — only when you really need it.
+
+### Pre-flight survey (the token-saving habit)
+
+When a search returns more than a handful of papers, ask Claude to **survey first**:
+
+- *"Search ADS for [topic], then run the pre-flight survey on the results."*
+- *"Cluster these papers into focus and exclude topics so I can pick a scope."*
+
+Claude returns 4 focus + 4 exclude options and **waits**. Reply with your scope, and only then
+will it acquire/read the chosen subset.
+
+### PDF-only papers
+
+If arXiv has no LaTeX source, `get_paper` downloads the PDF and runs **docling** to produce a
+markdown copy. Claude reads the markdown, never the raw PDF.
+
+- *"Acquire [closed-access bibcode]; if you can't auto-download, tell me where to drop the PDF."*
+- After dropping a PDF in `inbox/`: *"Ingest the inbox."* → `ingest_inbox`
+
+### Inspect usage and saved tokens
+
+- *"What's my ADS quota and how many tokens has the library served?"* → `usage_stats`
+- *"How much was saved by reading sections instead of full papers?"*
+
+## Phrasing matters: "citations" vs "references"
+
+NASA ADS (and `related_papers`) splits the citation graph into two **opposite** directions:
+
+- **`references`** — the papers this paper **cites** (its bibliography; backward; the
+  *foundations*).
+- **`citations`** — the papers that **cite this** paper (forward; the *impact / what came after*).
+
+Everyday English mixes them up, so when prompting be explicit. Examples:
+
+### To get the paper's bibliography (references) on a topic
+
+| Say this | What runs |
+|---|---|
+| "What does 2010ApJ...720.1038B cite about the halo model?" | `mode="references", topic="halo model"` |
+| "Methodology references in 2010ApJ...720.1038B for the gas density profile." | `mode="references", topic="gas density"` |
+| "What is this paper built on for its mass profile?" | `mode="references", topic="mass profile"` |
+
+### To get works that cited this paper (forward citations) on a topic
+
+| Say this | What runs |
+|---|---|
+| "**What papers cite** 2010ApJ...720.1038B about density profiles?" | `mode="citations", topic="density profile"` |
+| "**Who built on** this paper for gas density work?" | `mode="citations", topic="gas density"` |
+| "**What came after** 2010ApJ...720.1038B on cluster mass profiles?" | `mode="citations", topic="cluster mass"` |
+| "Forward citations of this paper, filtered by ICM thermodynamics." | `mode="citations", topic="ICM"` |
+
+### Avoid (ambiguous — triggers a clarifying question)
+
+- *"the citations of this paper"* — could mean either direction
+- *"its citations"* — same problem
+- *"citing papers"* — slightly forward-leaning, but still ask to be safe
+
+### Topically adjacent (no direct graph edge)
+
+- "Papers similar to 2010ApJ...720.1038B" → `mode="similar"`
+
 ## Setup
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
