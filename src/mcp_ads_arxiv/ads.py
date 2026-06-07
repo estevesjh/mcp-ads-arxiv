@@ -10,6 +10,8 @@ from typing import Any
 from mcp_server_ads.client import ADSClient
 from mcp_server_ads.config import ADS_API_URL
 
+from . import cache
+
 _SEARCH_FIELDS = "bibcode,title,abstract,keyword,year,author,identifier"
 _RELATE_MODES = ("citations", "references", "similar")
 
@@ -60,6 +62,8 @@ async def _query(q: str, rows: int) -> list[dict[str, Any]]:
         "/v1/search/query",
         params={"q": q, "rows": rows, "fl": _SEARCH_FIELDS, "sort": "date desc"},
     )
+    rl = client.rate_limits
+    cache.record_ads_call(limit=rl.limit, remaining=rl.remaining, reset=rl.reset)
     docs = data.get("response", {}).get("docs", [])
     return _docs_to_papers(docs)
 

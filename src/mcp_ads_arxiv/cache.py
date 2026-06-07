@@ -36,6 +36,26 @@ CREATE TABLE IF NOT EXISTS papers (
 );
 CREATE INDEX IF NOT EXISTS idx_papers_bibcode  ON papers(bibcode);
 CREATE INDEX IF NOT EXISTS idx_papers_arxiv_id ON papers(arxiv_id);
+
+CREATE TABLE IF NOT EXISTS ads_usage (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    call_count    INTEGER NOT NULL DEFAULT 0,
+    last_limit    INTEGER,   -- ADS daily quota (x-ratelimit-limit)
+    last_remaining INTEGER,  -- ADS remaining today (x-ratelimit-remaining)
+    last_reset    REAL,      -- epoch seconds when the quota resets (x-ratelimit-reset)
+    last_call_at  REAL       -- epoch seconds of our most recent call
+);
+INSERT OR IGNORE INTO ads_usage (id, call_count) VALUES (1, 0);
+
+-- Cumulative count of tokens this server has SERVED to the model (a proxy for what
+-- Claude ingests from this library; the client's true billed total is not visible here).
+CREATE TABLE IF NOT EXISTS token_usage (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    tokens_served   INTEGER NOT NULL DEFAULT 0,
+    tokens_saved    INTEGER NOT NULL DEFAULT 0,  -- full-text minus served, when sectioned
+    response_count  INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO token_usage (id) VALUES (1);
 """
 
 _LIST_FIELDS = {"keywords", "authors"}
@@ -133,6 +153,48 @@ def set_state(key: str, state: str, **paths: str) -> None:
             f"UPDATE papers SET {assignments} WHERE key = ?",
             [state, *allowed.values(), key],
         )
+
+
+def record_ads_call(limit: int | None = None, remaining: int | None = None,
+                    reset: float | None = None) -> None:
+    """Increment the persisted ADS call count and store the latest live quota headers."""
+    import time
+
+    sets = ["call_count = call_count + 1", "last_call_at = ?"]
+    params: list[Any] = [time.time()]
+    if limit is not None:
+        sets.append("last_limit = ?"); params.append(limit)
+    if remaining is not None:
+        sets.append("last_remaining = ?"); params.append(remaining)
+    if reset is not None:
+        sets.append("last_reset = ?"); params.append(reset)
+    with connect() as conn:
+        conn.execute(f"UPDATE ads_usage SET {', '.join(sets)} WHERE id = 1", params)
+
+
+def ads_usage() -> dict[str, Any]:
+    """Return persisted call count plus the most recent ADS quota snapshot."""
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM ads_usage WHERE id = 1").fetchone()
+    return dict(row) if row else {"call_count": 0}
+
+
+def record_tokens(served: int, saved: int = 0) -> None:
+    """Add to the cumulative count of tokens served to (and saved from) the model."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE token_usage SET tokens_served = tokens_served + ?, "
+            "tokens_saved = tokens_saved + ?, response_count = response_count + 1 "
+            "WHERE id = 1",
+            (served, saved),
+        )
+
+
+def token_usage() -> dict[str, Any]:
+    """Return cumulative tokens served / saved and the number of responses measured."""
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM token_usage WHERE id = 1").fetchone()
+    return dict(row) if row else {"tokens_served": 0, "tokens_saved": 0, "response_count": 0}
 
 
 def search(pattern: str, limit: int = 50) -> list[dict[str, Any]]:

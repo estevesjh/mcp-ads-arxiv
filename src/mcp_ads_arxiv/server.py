@@ -12,7 +12,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from . import acquire as _acquire
-from . import ads, bib, cache, config, survey
+from . import ads, bib, cache, config, survey, tokens
 
 mcp = FastMCP("mcp-ads-arxiv")
 
@@ -106,18 +106,22 @@ def read_paper(identifier: str, sections: list[str] | None = None) -> dict[str, 
     if state == "tex" and paper.get("tex_path"):
         from arxiv_to_prompt import extract_section, list_sections
 
-        text = open(paper["tex_path"], encoding="utf-8").read()
+        full = open(paper["tex_path"], encoding="utf-8").read()
         if not sections:
+            cost = tokens.measure(full)
             return {"key": paper["key"], "format": "latex",
-                    "sections_available": list_sections(text), "text": text}
-        chosen = "\n\n".join(extract_section(text, s) or "" for s in sections)
-        return {"key": paper["key"], "format": "latex", "sections": sections, "text": chosen}
+                    "sections_available": list_sections(full), "text": full, **cost}
+        chosen = "\n\n".join(extract_section(full, s) or "" for s in sections)
+        cost = tokens.measure(chosen, full_text=full)
+        return {"key": paper["key"], "format": "latex", "sections": sections,
+                "text": chosen, **cost}
 
     if state == "md" and paper.get("md_path"):
-        text = open(paper["md_path"], encoding="utf-8").read()
-        if sections:
-            text = _slice_markdown(text, sections)
-        return {"key": paper["key"], "format": "markdown", "sections": sections, "text": text}
+        full = open(paper["md_path"], encoding="utf-8").read()
+        text = _slice_markdown(full, sections) if sections else full
+        cost = tokens.measure(text, full_text=full if sections else None)
+        return {"key": paper["key"], "format": "markdown", "sections": sections,
+                "text": text, **cost}
 
     return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
 
@@ -128,6 +132,33 @@ def ingest_inbox() -> dict[str, Any]:
     library. Use after get_paper reported it could not auto-download a paper."""
     results = _acquire.ingest_inbox()
     return {"ingested": len(results), "papers": results}
+
+
+@mcp.tool
+def usage_stats() -> dict[str, Any]:
+    """Report cumulative usage for this library.
+
+    `tokens_served` is the total tokens this server has handed to the model (a proxy for what
+    Claude ingests from the library — the client's true billed total is not visible to an MCP
+    server). `tokens_saved` is how much was avoided by serving sections instead of full papers.
+    Also reports ADS API call count and the latest live ADS quota."""
+    tu = cache.token_usage()
+    au = cache.ads_usage()
+    served = tu.get("tokens_served", 0)
+    saved = tu.get("tokens_saved", 0)
+    total_if_full = served + saved
+    pct = round(100 * saved / total_if_full, 1) if total_if_full else 0.0
+    return {
+        "tokens_served": served,
+        "tokens_saved": saved,
+        "savings_pct": pct,
+        "responses_measured": tu.get("response_count", 0),
+        "ads_calls": au.get("call_count", 0),
+        "ads_quota_remaining": au.get("last_remaining"),
+        "ads_quota_limit": au.get("last_limit"),
+        "note": "tokens_served is a proxy measured at the server; Claude's billed total is "
+                "not observable from an MCP server.",
+    }
 
 
 def _slice_markdown(text: str, sections: list[str]) -> str:
