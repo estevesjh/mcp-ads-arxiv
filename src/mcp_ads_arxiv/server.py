@@ -71,11 +71,25 @@ def generate_dynamic_survey(papers: list[dict[str, Any]], n: int = 4) -> dict[st
 
 
 @mcp.tool
-def get_paper(identifier: str) -> dict[str, Any]:
-    """Acquire a paper into the local library. Resolves a cached identifier (bibcode / arXiv id
-    / key), then tries arXiv LaTeX source first, falls back to PDF->markdown (docling), and if
-    neither works asks you to drop a PDF in the inbox. NEVER reads a PDF raw. Run search_ads or
-    search_library first so the paper's metadata is known."""
+def set_project_dir(path: str | None = None) -> dict[str, Any]:
+    """Pin a project directory for the rest of this server's lifetime. After this, get_paper
+    automatically symlinks each requested paper into <path>/papers/ as <bibcode>/ AND also
+    downloads its PDF to <path>/papers/<FirstAuthorLastNameYear>.pdf for human reading.
+
+    Pass the absolute path of your Claude Code session's working folder. Pass None or an empty
+    string to clear. Project ./papers/ is just a shortcut view — sources stay in the global
+    library so search_library remains powerful."""
+    pinned = config.set_project_dir(path or None)
+    return {"project_dir": str(pinned) if pinned else None}
+
+
+@mcp.tool
+def get_paper(identifier: str, project_dir: str | None = None) -> dict[str, Any]:
+    """Acquire a paper into the GLOBAL library, then (if a project_dir is set or passed) drop
+    two shortcuts into <project_dir>/papers/: a symlink named <key>/ pointing to the source,
+    and the PDF named <FirstAuthorLastNameYear>.pdf for human reading. Resolves bibcode /
+    arXiv id / key. Tries arXiv LaTeX source first, falls back to PDF->markdown (docling),
+    and if neither works asks you to drop a PDF in the inbox. NEVER reads a PDF raw."""
     paper = (
         cache.get(identifier)
         or cache.find_by(bibcode=identifier, arxiv_id=identifier)
@@ -90,6 +104,15 @@ def get_paper(identifier: str) -> dict[str, Any]:
     result = _acquire.acquire(paper)
     if result.get("state") in ("tex", "md"):
         bib.append_entry(bib.make_entry(paper))
+        link = config.link_paper_into_project(paper["key"], project_dir)
+        if link.get("link"):
+            result["project_link"] = link["link"]
+        # Also fetch the PDF for human reading and drop it next to the symlink.
+        pdf = _acquire.fetch_pdf(cache.get(paper["key"]), project_dir=project_dir)
+        if pdf.get("project_pdf"):
+            result["project_pdf"] = pdf["project_pdf"]
+        elif pdf.get("pdf_path"):
+            result["pdf_path"] = pdf["pdf_path"]
     return result
 
 
@@ -124,6 +147,43 @@ def read_paper(identifier: str, sections: list[str] | None = None) -> dict[str, 
                 "text": text, **cost}
 
     return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
+
+
+@mcp.tool
+def library_status(project_dir: str | None = None) -> dict[str, Any]:
+    """Report where the global library lives and what's symlinked into the project's papers/."""
+    import os
+
+    papers = config.project_papers_dir(project_dir)
+    if papers and papers.exists():
+        linked = sorted(p.name for p in papers.iterdir() if p.is_symlink() or p.is_dir())
+    else:
+        linked = []
+    return {
+        "global_library_root": str(config.library_root()),
+        "lit_cache_dir_env": os.environ.get("LIT_CACHE_DIR"),
+        "project_papers_dir": str(papers) if papers else None,
+        "linked_in_project": linked,
+        "linked_count": len(linked),
+    }
+
+
+@mcp.tool
+def unlink_paper(key: str, project_dir: str | None = None) -> dict[str, Any]:
+    """Remove a paper's project-side symlink. The paper stays in the global library."""
+    return config.unlink_paper_from_project(key, project_dir)
+
+
+@mcp.tool
+def fetch_pdf(identifier: str, project_dir: str | None = None) -> dict[str, Any]:
+    """Download the original PDF of an acquired paper for HUMAN reading (open it in a viewer).
+    Stores the original under the global library AND, if a project_dir is set/passed, drops a
+    <FirstAuthorLastNameYear>.pdf symlink in <project_dir>/papers/. Claude still serves the
+    cached .tex/.md to itself — the PDF is not used as model input."""
+    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+    if paper is None:
+        return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
+    return _acquire.fetch_pdf(paper, project_dir=project_dir)
 
 
 @mcp.tool

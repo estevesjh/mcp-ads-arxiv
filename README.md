@@ -86,6 +86,22 @@ Add to your Claude Desktop config:
 
 Restart the client afterwards.
 
+### Skip the per-call permission prompts (Claude Code only)
+
+By default Claude Code asks for approval the first time each tool is used. To pre-approve all 8
+tools from this server, add one entry to `~/.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp__mcp-ads-arxiv"]
+  }
+}
+```
+
+The `mcp__<server-name>` prefix matches every tool the server exposes. Merge with any existing
+`allow` array — don't replace it. Restart Claude Code to pick up the change.
+
 ## Development
 
 ```bash

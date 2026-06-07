@@ -42,6 +42,50 @@ def _download(url: str, dest: Path, *, label: str) -> bool:
         return False
 
 
+def fetch_pdf(paper: dict, project_dir: str | None = None) -> dict:
+    """Download a paper's PDF for human reading, even when .tex is already present.
+
+    Stores library/<key>/original.pdf in the global library. Does NOT change the paper's state
+    — Claude continues to serve the .tex/.md it was already serving. The PDF is for you.
+
+    If a project dir is set/passed, also drops a symlink at <project_dir>/papers/<LastNameYear>.pdf
+    so you can open it by author rather than by bibcode.
+    """
+    key = paper["key"]
+    dest = config.paper_dir(key) / "original.pdf"
+    config.ensure_dirs()
+    downloaded = False
+    if not (dest.exists() and dest.stat().st_size > 1024):
+        arxiv_id = paper.get("arxiv_id") or None
+        bibcode = paper.get("bibcode") or ""
+        ok = False
+        for url in ads.pdf_urls(bibcode, arxiv_id):
+            if _download(url, dest, label=f"PDF {key}"):
+                ok = True
+                downloaded = True
+                cache.upsert({"key": key, "pdf_path": str(dest)})
+                break
+        if not ok:
+            return {
+                "key": key,
+                "error": (
+                    f"Could not download a PDF for {key}. The paper may be closed-access. "
+                    f"Drop the file into {config.inbox_dir()} and call ingest_inbox()."
+                ),
+            }
+
+    result: dict = {"key": key, "pdf_path": str(dest), "downloaded": downloaded}
+
+    papers_dir = config.project_papers_dir(project_dir)
+    if papers_dir is not None:
+        papers_dir.mkdir(parents=True, exist_ok=True)
+        friendly = papers_dir / config.first_author_year_filename(paper, ext="pdf")
+        if not friendly.exists() and not friendly.is_symlink():
+            friendly.symlink_to(dest)
+        result["project_pdf"] = str(friendly)
+    return result
+
+
 def fetch_tex(arxiv_id: str, key: str) -> Path | None:
     """Download + flatten arXiv LaTeX source into library/<key>/source.tex."""
     from arxiv_to_prompt import process_latex_source
