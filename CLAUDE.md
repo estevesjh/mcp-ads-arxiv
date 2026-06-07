@@ -74,19 +74,25 @@ options before reading any full text.
 2. PDF download (ADS link_gateway / arXiv) → docling → markdown.
 3. If neither works: drop a PDF into `inbox/`, then call `ingest_inbox`.
 
-## Reading protocol — never read the whole paper to find a section
+## Reading protocol — prefer one-shot tools, never read the whole paper to find a section
 
-For ANY "tell me about X in paper Y" / "summarize Y's methodology" / "show me the Tree-rings
-section" workflow, follow this exact order. Skipping a step burns 10–100× more tokens than
-needed.
+Routing table for "show me X of paper Y" workflows:
 
-1. `list_sections(identifier)` — cheap (a few hundred tokens). Returns headings + abstract.
-2. Pick the section names that match what the user asked for (be liberal — the user may say
-   "methodology" while the paper calls it "A Model of the Intergalactic Medium").
-3. `read_paper(identifier, sections=[chosen])` — only the sections you need.
+| User asks | Tool | Calls |
+|---|---|---|
+| "summarize the methodology / results / introduction / discussion / conclusions / abstract" | `read_topic(identifier, topic="methodology")` | **1** |
+| "show me the Tree-rings section" / any specific named section | `read_topic(identifier, topic="tree-rings")` | **1** |
+| "what sections are in this paper?" | `list_sections(identifier)` | 1 |
+| "I need exactly section A and B" (you already know the labels) | `read_paper(identifier, sections=["A","B"])` | 1 |
+| "read the whole paper" (rarely needed) | `read_paper(identifier, full=True)` | 1 |
+
+**Default to `read_topic` for natural-language asks.** It's a single call; section-name matching
+is fuzzy (LaTeX macros, whitespace, and case are normalized), so you don't need to peek at
+`list_sections` first. Only escalate to `list_sections` → `read_paper(sections=...)` when
+`read_topic` reports `matched_sections: []` and shows you the available labels.
 
 **Do not call `read_paper` with no `sections=`** unless the user explicitly asked for the whole
-paper. The tool will refuse and remind you to use `list_sections` first.
+paper. The tool refuses such calls with a hint to use `read_topic` or `list_sections`.
 
-**Do not re-call `get_paper`** on a paper that's already acquired. Check `search_library` first;
-if the paper has `state=tex` or `state=md`, go straight to `list_sections` / `read_paper`.
+**Do not re-call `get_paper`** on a paper that's already acquired. `search_library` will tell
+you the paper's `state`; if it's `tex` or `md`, go straight to `read_topic`.

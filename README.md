@@ -29,6 +29,8 @@ Built for literature reviewers who want a fast, token-frugal, reusable local cor
 | `generate_dynamic_survey` | Cluster metadata into 4 focus + 4 exclude topics. |
 | `get_paper` | Acquire into the library: arXiv `.tex` → PDF→markdown → inbox prompt. |
 | `read_paper` | Serve stored text; optional `sections` to save tokens. |
+| `list_sections` | Cheap heading list + abstract (a few hundred tokens). |
+| `read_topic` | One-shot "show me the methodology / results / [section]" with fuzzy match. |
 | `ingest_inbox` | Convert PDFs dropped in `inbox/` to markdown. |
 
 ## Talking to the tool: prompt cookbook
@@ -70,9 +72,17 @@ The originals stay in the global library — no data duplication.
 
 ### Read a paper without burning tokens
 
-- *"Read just the **Methodology** and **Results** of [paper]."* — sectioned, ~10× cheaper.
+For natural-language asks, **one tool call is enough** — `read_topic` resolves the topic to
+the right section(s) automatically (fuzzy match on LaTeX macros, whitespace, and case):
+
+- *"Summarize the **methodology** of 2010ApJ...720.1038B."* — one call to `read_topic`.
 - *"Show me the **Tree-rings** section of 2023PASP..135k5003E."*
-- *"List the section headings of [paper] before reading anything."*
+- *"What does the **discussion** of [paper] say?"*
+
+When you already know the exact labels, or want multiple specific sections:
+
+- *"Read just the **Application** and **Discussion** sections of [paper]."* → `read_paper(sections=[...])`
+- *"List the section headings of [paper]."* → `list_sections`
 - *"Read the full text of [paper]."* — only when you really need it.
 
 ### Pre-flight survey (the token-saving habit)

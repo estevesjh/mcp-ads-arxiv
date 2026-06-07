@@ -12,7 +12,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from . import acquire as _acquire
-from . import ads, bib, cache, config, survey, tokens
+from . import ads, bib, cache, config, sections as _sections, survey, tokens
 
 mcp = FastMCP("mcp-ads-arxiv")
 
@@ -150,22 +150,94 @@ def list_sections(identifier: str) -> dict[str, Any]:
         from arxiv_to_prompt import extract_abstract, list_sections as _list_tex
 
         text = open(paper["tex_path"], encoding="utf-8").read()
-        sections = _list_tex(text)
+        raw = _list_tex(text)
         abstract = extract_abstract(text) or ""
-        result = {"key": paper["key"], "format": "latex",
-                  "sections": sections, "abstract": abstract}
-        result.update(tokens.measure(abstract))  # only the abstract is "served"
+        result = {
+            "key": paper["key"], "format": "latex",
+            "sections": [
+                {"label": _sections.display_label(h), "raw": h} for h in raw
+            ],
+            "abstract": abstract,
+        }
+        result.update(tokens.measure(abstract))
         return result
 
     if state == "md" and paper.get("md_path"):
         text = open(paper["md_path"], encoding="utf-8").read()
-        headings = [
+        raw = [
             line.lstrip("#").strip()
             for line in text.splitlines() if line.lstrip().startswith("#")
         ]
-        result = {"key": paper["key"], "format": "markdown", "sections": headings}
+        result = {
+            "key": paper["key"], "format": "markdown",
+            "sections": [{"label": h, "raw": h} for h in raw],
+        }
         result.update(tokens.measure(""))
         return result
+
+    return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
+
+
+@mcp.tool
+def read_topic(identifier: str, topic: str) -> dict[str, Any]:
+    """ONE-SHOT 'show me the X of paper Y'. Resolves a natural-language topic
+    ('methodology', 'results', 'discussion', 'conclusions', 'introduction', 'abstract', or
+    a free-text section name) to the matching section(s) and returns just that text.
+
+    Use this whenever the user names a topic — it skips the list_sections round trip and
+    keeps the call count low. Multiple matches are concatenated. If nothing matches, the
+    tool reports the available section labels so you can ask the user for guidance instead
+    of guessing."""
+    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+    if paper is None:
+        return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
+
+    state = paper.get("state")
+    if state == "tex" and paper.get("tex_path"):
+        from arxiv_to_prompt import extract_abstract, list_sections as _list_tex
+
+        full_text = open(paper["tex_path"], encoding="utf-8").read()
+
+        if topic.strip().lower() == "abstract":
+            text = extract_abstract(full_text) or ""
+            cost = tokens.measure(text, full_text=full_text)
+            return {"key": paper["key"], "topic": topic, "matched_sections": ["abstract"],
+                    "text": text, **cost}
+
+        raw = _list_tex(full_text)
+        hits = _sections.resolve_topic(topic, raw)
+        if not hits:
+            return {
+                "key": paper["key"], "topic": topic, "matched_sections": [],
+                "available_labels": [_sections.display_label(h) for h in raw],
+                "hint": "no section matched; ask the user which label to use, or pass it "
+                        "to read_paper(sections=[...]).",
+            }
+        chosen = "\n\n".join(_sections.extract_by_raw_name(full_text, h) for h in hits)
+        cost = tokens.measure(chosen, full_text=full_text)
+        return {
+            "key": paper["key"], "topic": topic,
+            "matched_sections": [_sections.display_label(h) for h in hits],
+            "text": chosen, **cost,
+        }
+
+    if state == "md" and paper.get("md_path"):
+        full_text = open(paper["md_path"], encoding="utf-8").read()
+        raw = [
+            line.lstrip("#").strip()
+            for line in full_text.splitlines() if line.lstrip().startswith("#")
+        ]
+        hits = _sections.resolve_topic(topic, raw)
+        if not hits:
+            return {
+                "key": paper["key"], "topic": topic, "matched_sections": [],
+                "available_labels": raw,
+                "hint": "no section matched; ask the user which label to use.",
+            }
+        text = _slice_markdown(full_text, hits)
+        cost = tokens.measure(text, full_text=full_text)
+        return {"key": paper["key"], "topic": topic, "matched_sections": hits,
+                "text": text, **cost}
 
     return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
 
@@ -193,14 +265,28 @@ def read_paper(identifier: str, sections: list[str] | None = None,
 
     state = paper.get("state")
     if state == "tex" and paper.get("tex_path"):
-        from arxiv_to_prompt import extract_section, list_sections as _list_tex
+        from arxiv_to_prompt import list_sections as _list_tex
 
         full_text = open(paper["tex_path"], encoding="utf-8").read()
         if sections:
-            chosen = "\n\n".join(extract_section(full_text, s) or "" for s in sections)
+            raw_headings = _list_tex(full_text)
+            resolved: list[str] = []
+            unresolved: list[str] = []
+            for s in sections:
+                hit = _sections.resolve_section(s, raw_headings)
+                if hit:
+                    resolved.append(hit)
+                else:
+                    unresolved.append(s)
+            chosen = "\n\n".join(_sections.extract_by_raw_name(full_text, r) for r in resolved)
             cost = tokens.measure(chosen, full_text=full_text)
-            return {"key": paper["key"], "format": "latex", "sections": sections,
-                    "text": chosen, **cost}
+            return {
+                "key": paper["key"], "format": "latex",
+                "sections_requested": sections,
+                "sections_resolved": [_sections.display_label(r) for r in resolved],
+                "sections_unmatched": unresolved,
+                "text": chosen, **cost,
+            }
         cost = tokens.measure(full_text)
         return {"key": paper["key"], "format": "latex",
                 "sections_available": _list_tex(full_text), "text": full_text, **cost}
@@ -288,14 +374,17 @@ def usage_stats() -> dict[str, Any]:
 
 
 def _slice_markdown(text: str, sections: list[str]) -> str:
-    """Return only the markdown blocks whose heading matches one of `sections` (case-insensitive)."""
-    wanted = [s.lower() for s in sections]
+    """Return only the markdown blocks whose heading fuzzily matches one of `sections`.
+
+    Uses normalize_heading so 'methodology' matches '## Methodology and Models', etc.
+    """
+    wanted = [_sections.normalize_heading(s) for s in sections]
     out: list[str] = []
     keep = False
     for line in text.splitlines():
         if line.lstrip().startswith("#"):
-            heading = line.lstrip("#").strip().lower()
-            keep = any(w in heading for w in wanted)
+            heading = _sections.normalize_heading(line.lstrip("#"))
+            keep = any(w and (w in heading or heading in w) for w in wanted)
         if keep:
             out.append(line)
     return "\n".join(out)
