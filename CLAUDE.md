@@ -73,3 +73,20 @@ options before reading any full text.
 1. arXiv LaTeX source (preferred — equations and structure intact).
 2. PDF download (ADS link_gateway / arXiv) → docling → markdown.
 3. If neither works: drop a PDF into `inbox/`, then call `ingest_inbox`.
+
+## Reading protocol — never read the whole paper to find a section
+
+For ANY "tell me about X in paper Y" / "summarize Y's methodology" / "show me the Tree-rings
+section" workflow, follow this exact order. Skipping a step burns 10–100× more tokens than
+needed.
+
+1. `list_sections(identifier)` — cheap (a few hundred tokens). Returns headings + abstract.
+2. Pick the section names that match what the user asked for (be liberal — the user may say
+   "methodology" while the paper calls it "A Model of the Intergalactic Medium").
+3. `read_paper(identifier, sections=[chosen])` — only the sections you need.
+
+**Do not call `read_paper` with no `sections=`** unless the user explicitly asked for the whole
+paper. The tool will refuse and remind you to use `list_sections` first.
+
+**Do not re-call `get_paper`** on a paper that's already acquired. Check `search_library` first;
+if the paper has `state=tex` or `state=md`, go straight to `list_sections` / `read_paper`.

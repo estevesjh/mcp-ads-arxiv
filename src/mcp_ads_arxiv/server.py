@@ -109,7 +109,18 @@ def get_paper(identifier: str, project_dir: str | None = None) -> dict[str, Any]
                 "the paper's metadata is cached, then call get_paper with its key or bibcode."
             )
         }
-    result = _acquire.acquire(paper)
+
+    # Short-circuit: if the source is already cached on disk, skip the acquisition pipeline.
+    state = paper.get("state")
+    cached_path = paper.get("tex_path") if state == "tex" else paper.get("md_path") if state == "md" else None
+    from pathlib import Path as _P
+    if state in ("tex", "md") and cached_path and _P(cached_path).exists():
+        result: dict[str, Any] = {
+            "key": paper["key"], "state": state, "path": cached_path, "already_cached": True,
+        }
+    else:
+        result = _acquire.acquire(paper)
+
     if result.get("state") in ("tex", "md"):
         bib.append_entry(bib.make_entry(paper))
         link = config.link_paper_into_project(paper["key"], project_dir)
@@ -125,32 +136,79 @@ def get_paper(identifier: str, project_dir: str | None = None) -> dict[str, Any]
 
 
 @mcp.tool
-def read_paper(identifier: str, sections: list[str] | None = None) -> dict[str, Any]:
-    """Serve the stored text of an acquired paper (LaTeX source or docling markdown).
-    Optionally pass `sections` (names) to return only those — the token-saving path. Call
-    get_paper first if the paper is not yet acquired."""
+def list_sections(identifier: str) -> dict[str, Any]:
+    """Return ONLY the section headings (and the abstract) of an acquired paper. CHEAP — a few
+    hundred tokens, no body text. Use this to plan a targeted read_paper call: list headings
+    first, pick the ones you need, then read_paper(sections=[...]). Never read full text just
+    to discover what sections exist — that's a 10x-100x token waste."""
     paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
     if paper is None:
         return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
 
     state = paper.get("state")
     if state == "tex" and paper.get("tex_path"):
-        from arxiv_to_prompt import extract_section, list_sections
+        from arxiv_to_prompt import extract_abstract, list_sections as _list_tex
 
-        full = open(paper["tex_path"], encoding="utf-8").read()
-        if not sections:
-            cost = tokens.measure(full)
-            return {"key": paper["key"], "format": "latex",
-                    "sections_available": list_sections(full), "text": full, **cost}
-        chosen = "\n\n".join(extract_section(full, s) or "" for s in sections)
-        cost = tokens.measure(chosen, full_text=full)
-        return {"key": paper["key"], "format": "latex", "sections": sections,
-                "text": chosen, **cost}
+        text = open(paper["tex_path"], encoding="utf-8").read()
+        sections = _list_tex(text)
+        abstract = extract_abstract(text) or ""
+        result = {"key": paper["key"], "format": "latex",
+                  "sections": sections, "abstract": abstract}
+        result.update(tokens.measure(abstract))  # only the abstract is "served"
+        return result
 
     if state == "md" and paper.get("md_path"):
-        full = open(paper["md_path"], encoding="utf-8").read()
-        text = _slice_markdown(full, sections) if sections else full
-        cost = tokens.measure(text, full_text=full if sections else None)
+        text = open(paper["md_path"], encoding="utf-8").read()
+        headings = [
+            line.lstrip("#").strip()
+            for line in text.splitlines() if line.lstrip().startswith("#")
+        ]
+        result = {"key": paper["key"], "format": "markdown", "sections": headings}
+        result.update(tokens.measure(""))
+        return result
+
+    return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
+
+
+@mcp.tool
+def read_paper(identifier: str, sections: list[str] | None = None,
+               full: bool = False) -> dict[str, Any]:
+    """Serve the stored text of an acquired paper (LaTeX or docling markdown). The
+    token-saving path is `sections=[...]`; pass `full=True` only when you actually need the
+    whole body. With neither, this tool refuses and tells you to call list_sections first —
+    full-paper reads cost 10k+ tokens and you almost never need them just to find a section."""
+    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+    if paper is None:
+        return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
+
+    if not sections and not full:
+        return {
+            "error": (
+                "read_paper requires either sections=[...] or full=True. To discover headings "
+                "first (cheap, no body text), call list_sections(identifier)."
+            ),
+            "key": paper.get("key"),
+            "hint": "list_sections -> read_paper(sections=[chosen ones])",
+        }
+
+    state = paper.get("state")
+    if state == "tex" and paper.get("tex_path"):
+        from arxiv_to_prompt import extract_section, list_sections as _list_tex
+
+        full_text = open(paper["tex_path"], encoding="utf-8").read()
+        if sections:
+            chosen = "\n\n".join(extract_section(full_text, s) or "" for s in sections)
+            cost = tokens.measure(chosen, full_text=full_text)
+            return {"key": paper["key"], "format": "latex", "sections": sections,
+                    "text": chosen, **cost}
+        cost = tokens.measure(full_text)
+        return {"key": paper["key"], "format": "latex",
+                "sections_available": _list_tex(full_text), "text": full_text, **cost}
+
+    if state == "md" and paper.get("md_path"):
+        full_text = open(paper["md_path"], encoding="utf-8").read()
+        text = _slice_markdown(full_text, sections) if sections else full_text
+        cost = tokens.measure(text, full_text=full_text if sections else None)
         return {"key": paper["key"], "format": "markdown", "sections": sections,
                 "text": text, **cost}
 
