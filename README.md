@@ -228,7 +228,9 @@ export MCP_ADS_ARXIV_DIR="/path/to/mcp-ads-arxiv"   # where you cloned the repo
 claude mcp add --scope user mcp-ads-arxiv \
   -e ADS_API_TOKEN=$ADS_API_TOKEN \
   -e LIT_CACHE_DIR=$LIT_CACHE_DIR \
-  -- uv run --directory $MCP_ADS_ARXIV_DIR mcp-ads-arxiv
+  -- mcp-ads-arxiv
+# If you installed with uv (Option C) instead of pip, replace the last line with:
+#   -- uv run --directory $MCP_ADS_ARXIV_DIR mcp-ads-arxiv
 ```
 
 ### Claude Desktop
