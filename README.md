@@ -29,28 +29,10 @@ When no LaTeX source exists on arXiv, the PDF is converted to markdown via docli
 
 ## What it does
 
-- **Local-first search** over a persistent library (`literature_review.bib` + a SQLite index).
-- **ADS discovery** (metadata only: title, abstract, keywords, authors, year).
-- **Citation-graph traversal** — a paper's `references` (the *roots* of a project), its forward
-  `citations` (impact), or `similar` papers.
-- **Pre-Flight Survey** — clusters results into 4 focus + 4 exclude topics so you align on scope
-  *before* any full text is read.
-- **Acquisition** — arXiv `.tex` → PDF → (manual `inbox/` drop), then `read_paper` serves the
-  text, optionally a chosen subset of sections.
-
-## Tools
-
-| Tool | Purpose |
-| --- | --- |
-| `search_library` | Local, free search over already-acquired papers (title, abstract, **and authors**). |
-| `flexible_paper_search` | Human-friendly search (`Esteves 2023 tree rings`). ADS when token set; arXiv API fallback. |
-| `related_papers` | Citation graph: `references` / `citations` / `similar`, optional `topic`. |
-| `generate_dynamic_survey` | Cluster metadata into 4 focus + 4 exclude topics. |
-| `smart_fetch_paper_content` | One-call acquire + summarize: arXiv `.tex` → PDF→md → returns sections + abstract, no body. |
-| `read_paper` | Serve stored text; optional `sections` to save tokens. |
-| `list_sections` | Cheap heading list + abstract (a few hundred tokens). |
-| `read_topic` | One-shot "show me the methodology / results / [section]" with fuzzy match. |
-| `ingest_inbox` | Convert PDFs dropped in `inbox/` to markdown. |
+- **ADS Search** Execute native searches on ADS exactly like the web interface (metadata-only: title, abstract, keywords, authors, year).
+- **Local Library** Locally stores all acquired paper `.tex` files to prevent redundant network downloads.
+- **Pre-Flight Survey** Perform a top-level sweep on ADS for a topic. The tool clusters results into 4 interested topics and 4 excluded topics to align on scope before any full text is ingested.
+- **Intelligent Acquisition** Fetches arXiv .tex sources. If unavailable, it pulls the PDF to look for an inbox/ drop. read_paper subsequently serves the parsed text, optionally targeting a user-specified subset of sections.
 
 ## Talking to the tool: prompt cookbook
 
@@ -163,6 +145,20 @@ Everyday English mixes them up, so when prompting be explicit. Examples:
 ### Topically adjacent (no direct graph edge)
 
 - "Papers similar to 2010ApJ...720.1038B" → `mode="similar"`
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `search_library` | Local, free search over already-acquired papers (title, abstract, **and authors**). |
+| `flexible_paper_search` | Human-friendly search (`Esteves 2023 tree rings`). ADS when token set; arXiv API fallback. |
+| `related_papers` | Citation graph: `references` / `citations` / `similar`, optional `topic`. |
+| `generate_dynamic_survey` | Cluster metadata into 4 focus + 4 exclude topics. |
+| `smart_fetch_paper_content` | One-call acquire + summarize: arXiv `.tex` → PDF→md → returns sections + abstract, no body. |
+| `read_paper` | Serve stored text; optional `sections` to save tokens. |
+| `list_sections` | Cheap heading list + abstract (a few hundred tokens). |
+| `read_topic` | One-shot "show me the methodology / results / [section]" with fuzzy match. |
+| `ingest_inbox` | Convert PDFs dropped in `inbox/` to markdown. |
 
 ## Setup
 
