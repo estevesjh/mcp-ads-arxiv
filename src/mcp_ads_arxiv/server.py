@@ -23,24 +23,43 @@ _NO_TOKEN_MSG = (
 )
 
 
+_ADS_NUDGE = (
+    "Running in free arXiv-only mode. Set ADS_API_TOKEN to unlock citation graphs and "
+    "metrics — https://ui.adsabs.harvard.edu/user/settings/token"
+)
+
+
 @mcp.tool
 def search_library(query: str, limit: int = 50) -> list[dict[str, Any]]:
     """Search the LOCAL library first (free, no network). Regex or substring over titles and
     abstracts of papers already acquired. Returns hits with their acquisition `state`."""
-    return bib.search_local(query, limit=limit)
+    return [cache.view(p) for p in bib.search_local(query, limit=limit)]
 
 
 @mcp.tool
-async def search_ads(query: str, rows: int = 40) -> dict[str, Any]:
-    """Search NASA ADS for papers (metadata only: title, abstract, keywords, authors, year).
-    Caches results locally. Use AFTER search_library to fill gaps. Lightweight — no full text."""
+async def flexible_paper_search(query: str, max_results: int = 5) -> dict[str, Any]:
+    """Human-friendly literature search. Accepts natural academic notation such as
+    'Esteves 2023 tree rings', bare author names, or raw paper titles — no rigid syntax.
+
+    Uses NASA ADS when ADS_API_TOKEN is set (best coverage + metadata). With no token it
+    falls back to the free public arXiv API and appends a `tip` nudging you to add a key.
+    Caches every hit locally. Lightweight — metadata only, author lists compressed, no
+    full text. Feed >~10 hits into generate_dynamic_survey before reading any body."""
     try:
-        papers = await ads.search(query, rows=rows)
+        papers = await ads.search(ads.normalize_query(query), rows=max_results)
+        tip = None
     except ads.ADSTokenMissing:
-        return {"error": _NO_TOKEN_MSG, "papers": []}
+        papers = await ads.arxiv_search(query, rows=max_results)
+        tip = _ADS_NUDGE
     for p in papers:
         cache.upsert(p)
-    return {"count": len(papers), "papers": papers}
+    result: dict[str, Any] = {
+        "count": len(papers),
+        "papers": [cache.view(p) for p in papers],
+    }
+    if tip:
+        result["tip"] = tip
+    return result
 
 
 @mcp.tool
@@ -68,7 +87,7 @@ async def related_papers(bibcode: str, mode: str = "references", topic: str | No
         return {"error": str(exc), "papers": []}
     for p in papers:
         cache.upsert(p)
-    return {"count": len(papers), "mode": mode, "papers": papers}
+    return {"count": len(papers), "mode": mode, "papers": [cache.view(p) for p in papers]}
 
 
 @mcp.tool
@@ -80,7 +99,7 @@ def generate_dynamic_survey(papers: list[dict[str, Any]], n: int = 4) -> dict[st
 
 @mcp.tool
 def set_project_dir(path: str | None = None) -> dict[str, Any]:
-    """Pin a project directory for the rest of this server's lifetime. After this, get_paper
+    """Pin a project directory for the rest of this server's lifetime. After this, smart_fetch_paper_content
     automatically symlinks each requested paper into <path>/papers/ as <bibcode>/ AND also
     downloads its PDF to <path>/papers/<FirstAuthorLastNameYear>.pdf for human reading.
 
@@ -91,24 +110,69 @@ def set_project_dir(path: str | None = None) -> dict[str, Any]:
     return {"project_dir": str(pinned) if pinned else None}
 
 
-@mcp.tool
-def get_paper(identifier: str, project_dir: str | None = None) -> dict[str, Any]:
-    """Acquire a paper into the GLOBAL library, then (if a project_dir is set or passed) drop
-    two shortcuts into <project_dir>/papers/: a symlink named <key>/ pointing to the source,
-    and the PDF named <FirstAuthorLastNameYear>.pdf for human reading. Resolves bibcode /
-    arXiv id / key. Tries arXiv LaTeX source first, falls back to PDF->markdown (docling),
-    and if neither works asks you to drop a PDF in the inbox. NEVER reads a PDF raw."""
-    paper = (
-        cache.get(identifier)
-        or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+def _resolve_for_fetch(identifier: str) -> tuple[dict[str, Any] | None, bool, str | None]:
+    """Resolve an identifier to a paper dict ready for acquisition.
+
+    Returns (paper, used_free_path, error). Routing mirrors the dual-entry flowchart:
+      1. Already cached locally  -> use it (no network, no key needed).
+      2. ADS token present       -> ads.search to map the identifier to a bibcode/arXiv id.
+      3. No token, bare arXiv id  -> synthesize {key, arxiv_id} and stream .tex directly.
+      4. No token, title/bibcode  -> arxiv_search to resolve to an arXiv id.
+    """
+    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+    if paper is not None:
+        return paper, False, None
+
+    import asyncio
+
+    # ADS premium path: resolve unknown identifier via a metadata search.
+    try:
+        hits = asyncio.run(ads.search(identifier, rows=1))
+        if hits:
+            cache.upsert(hits[0])
+            return cache.get(hits[0]["key"]), False, None
+    except ads.ADSTokenMissing:
+        pass  # fall through to the free path
+
+    # Free path: a bare arXiv id streams .tex with no search at all.
+    if ads.is_arxiv_id(identifier):
+        arxiv_id = identifier.split(":", 1)[1] if ":" in identifier else identifier
+        import re as _re
+        arxiv_id = _re.sub(r"v\d+$", "", arxiv_id)
+        synth = {"key": arxiv_id, "arxiv_id": arxiv_id, "title": arxiv_id, "state": "metadata"}
+        cache.upsert(synth)
+        return cache.get(arxiv_id), True, None
+
+    # Free path: resolve a title/bibcode through the public arXiv API.
+    try:
+        hits = asyncio.run(ads.arxiv_search(identifier, rows=1))
+    except Exception as exc:  # network failure, malformed feed, etc.
+        return None, True, f"arXiv lookup for {identifier!r} failed: {exc}"
+    if hits:
+        cache.upsert(hits[0])
+        return cache.get(hits[0]["key"]), True, None
+
+    return None, True, (
+        f"Could not resolve {identifier!r} without an ADS key. Provide an explicit arXiv id "
+        "(e.g. 2303.08774) or set ADS_API_TOKEN."
     )
-    if paper is None:
-        return {
-            "error": (
-                f"Unknown identifier {identifier!r}. Run search_ads / search_library first so "
-                "the paper's metadata is cached, then call get_paper with its key or bibcode."
-            )
-        }
+
+
+@mcp.tool
+def smart_fetch_paper_content(identifier: str, project_dir: str | None = None) -> dict[str, Any]:
+    """Acquire a paper end-to-end in ONE call and report what's inside — WITHOUT dumping body
+    text. Returns acquisition `state`, the section headings, the abstract, and a compressed
+    author summary, which is everything you need to run the pre-flight survey. Read actual
+    body text afterwards with read_topic / read_paper.
+
+    Accepts a bibcode, an ADS key, OR a bare arXiv id (e.g. 2303.08774). Resolves the best
+    text form internally: cached copy -> ADS (if a token is set) -> free arXiv API. Drops a
+    <project_dir>/papers/<key>/ symlink and a human-readable PDF when a project_dir is active.
+    NEVER reads a PDF raw."""
+    paper, used_free, error = _resolve_for_fetch(identifier)
+    if error:
+        return {"error": error}
+    assert paper is not None
 
     # Short-circuit: if the source is already cached on disk, skip the acquisition pipeline.
     state = paper.get("state")
@@ -132,19 +196,27 @@ def get_paper(identifier: str, project_dir: str | None = None) -> dict[str, Any]
             result["project_pdf"] = pdf["project_pdf"]
         elif pdf.get("pdf_path"):
             result["pdf_path"] = pdf["pdf_path"]
+
+        # Report what's inside (headings + abstract) so the survey can run without a 2nd call.
+        fresh = cache.get(paper["key"]) or paper
+        payload = _list_sections_payload(fresh)
+        if payload:
+            result.update(payload)
+        shielded = cache.view(fresh)
+        result["authors"] = shielded["authors"]
+        result["author_count"] = shielded["author_count"]
+
+    if used_free:
+        result["tip"] = _ADS_NUDGE
     return result
 
 
-@mcp.tool
-def list_sections(identifier: str) -> dict[str, Any]:
-    """Return ONLY the section headings (and the abstract) of an acquired paper. CHEAP — a few
-    hundred tokens, no body text. Use this to plan a targeted read_paper call: list headings
-    first, pick the ones you need, then read_paper(sections=[...]). Never read full text just
-    to discover what sections exist — that's a 10x-100x token waste."""
-    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
-    if paper is None:
-        return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
+def _list_sections_payload(paper: dict[str, Any]) -> dict[str, Any] | None:
+    """Headings (+ abstract for LaTeX) of an acquired paper. None if no servable text yet.
 
+    Shared by list_sections and smart_fetch_paper_content so both stay cheap and consistent.
+    Measures only the abstract's token cost (headings are negligible).
+    """
     state = paper.get("state")
     if state == "tex" and paper.get("tex_path"):
         from arxiv_to_prompt import extract_abstract, list_sections as _list_tex
@@ -153,10 +225,8 @@ def list_sections(identifier: str) -> dict[str, Any]:
         raw = _list_tex(text)
         abstract = extract_abstract(text) or ""
         result = {
-            "key": paper["key"], "format": "latex",
-            "sections": [
-                {"label": _sections.display_label(h), "raw": h} for h in raw
-            ],
+            "format": "latex",
+            "sections": [{"label": _sections.display_label(h), "raw": h} for h in raw],
             "abstract": abstract,
         }
         result.update(tokens.measure(abstract))
@@ -169,13 +239,30 @@ def list_sections(identifier: str) -> dict[str, Any]:
             for line in text.splitlines() if line.lstrip().startswith("#")
         ]
         result = {
-            "key": paper["key"], "format": "markdown",
+            "format": "markdown",
             "sections": [{"label": h, "raw": h} for h in raw],
         }
         result.update(tokens.measure(""))
         return result
 
-    return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
+    return None
+
+
+@mcp.tool
+def list_sections(identifier: str) -> dict[str, Any]:
+    """Return ONLY the section headings (and the abstract) of an acquired paper. CHEAP — a few
+    hundred tokens, no body text. Use this to plan a targeted read_paper call: list headings
+    first, pick the ones you need, then read_paper(sections=[...]). Never read full text just
+    to discover what sections exist — that's a 10x-100x token waste."""
+    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+    if paper is None:
+        return {"error": f"{identifier!r} is not in the library. Call smart_fetch_paper_content first."}
+
+    payload = _list_sections_payload(paper)
+    if payload is None:
+        return {"error": f"{identifier!r} has no servable text yet (state={paper.get('state')}). "
+                         "Call smart_fetch_paper_content."}
+    return {"key": paper["key"], **payload}
 
 
 @mcp.tool
@@ -190,7 +277,7 @@ def read_topic(identifier: str, topic: str) -> dict[str, Any]:
     of guessing."""
     paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
     if paper is None:
-        return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
+        return {"error": f"{identifier!r} is not in the library. Call smart_fetch_paper_content first."}
 
     state = paper.get("state")
     if state == "tex" and paper.get("tex_path"):
@@ -239,7 +326,7 @@ def read_topic(identifier: str, topic: str) -> dict[str, Any]:
         return {"key": paper["key"], "topic": topic, "matched_sections": hits,
                 "text": text, **cost}
 
-    return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
+    return {"error": f"{identifier!r} has no servable text yet (state={state}). Call smart_fetch_paper_content."}
 
 
 @mcp.tool
@@ -251,7 +338,7 @@ def read_paper(identifier: str, sections: list[str] | None = None,
     full-paper reads cost 10k+ tokens and you almost never need them just to find a section."""
     paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
     if paper is None:
-        return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
+        return {"error": f"{identifier!r} is not in the library. Call smart_fetch_paper_content first."}
 
     if not sections and not full:
         return {
@@ -298,7 +385,7 @@ def read_paper(identifier: str, sections: list[str] | None = None,
         return {"key": paper["key"], "format": "markdown", "sections": sections,
                 "text": text, **cost}
 
-    return {"error": f"{identifier!r} has no servable text yet (state={state}). Call get_paper."}
+    return {"error": f"{identifier!r} has no servable text yet (state={state}). Call smart_fetch_paper_content."}
 
 
 @mcp.tool
@@ -334,14 +421,14 @@ def fetch_pdf(identifier: str, project_dir: str | None = None) -> dict[str, Any]
     cached .tex/.md to itself — the PDF is not used as model input."""
     paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
     if paper is None:
-        return {"error": f"{identifier!r} is not in the library. Call get_paper first."}
+        return {"error": f"{identifier!r} is not in the library. Call smart_fetch_paper_content first."}
     return _acquire.fetch_pdf(paper, project_dir=project_dir)
 
 
 @mcp.tool
 def ingest_inbox() -> dict[str, Any]:
     """Convert every PDF dropped in the inbox/ directory to markdown and file it into the
-    library. Use after get_paper reported it could not auto-download a paper."""
+    library. Use after smart_fetch_paper_content reported it could not auto-download a paper."""
     results = _acquire.ingest_inbox()
     return {"ingested": len(results), "papers": results}
 
@@ -390,8 +477,30 @@ def _slice_markdown(text: str, sections: list[str]) -> str:
     return "\n".join(out)
 
 
+def _warn_if_no_ads_key() -> None:
+    """Print a one-time stderr notice when no ADS token is configured (free arXiv-only mode).
+
+    stderr only — stdout is the JSON-RPC channel and must stay clean.
+    """
+    import sys
+
+    from mcp_server_ads.client import ADSClient
+    from mcp_server_ads.errors import ADSAuthError
+
+    try:
+        ADSClient.create()
+    except ADSAuthError:
+        print(
+            "[mcp-ads-arxiv] No ADS_API_TOKEN found — running in FREE arXiv-only mode.\n"
+            "  Discovery falls back to the public arXiv API; citation graphs/metrics are disabled.\n"
+            "  Get a free token: https://ui.adsabs.harvard.edu/user/settings/token",
+            file=sys.stderr, flush=True,
+        )
+
+
 def main() -> None:
     config.ensure_dirs()
+    _warn_if_no_ads_key()
     mcp.run()
 
 

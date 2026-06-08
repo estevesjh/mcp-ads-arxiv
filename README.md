@@ -23,11 +23,11 @@ Built for literature reviewers who want a fast, token-frugal, reusable local cor
 
 | Tool | Purpose |
 | --- | --- |
-| `search_library` | Local, free search over already-acquired papers. |
-| `search_ads` | NASA ADS metadata search (fills gaps after `search_library`). |
+| `search_library` | Local, free search over already-acquired papers (title, abstract, **and authors**). |
+| `flexible_paper_search` | Human-friendly search (`Esteves 2023 tree rings`). ADS when token set; arXiv API fallback. |
 | `related_papers` | Citation graph: `references` / `citations` / `similar`, optional `topic`. |
 | `generate_dynamic_survey` | Cluster metadata into 4 focus + 4 exclude topics. |
-| `get_paper` | Acquire into the library: arXiv `.tex` → PDF→markdown → inbox prompt. |
+| `smart_fetch_paper_content` | One-call acquire + summarize: arXiv `.tex` → PDF→md → returns sections + abstract, no body. |
 | `read_paper` | Serve stored text; optional `sections` to save tokens. |
 | `list_sections` | Cheap heading list + abstract (a few hundred tokens). |
 | `read_topic` | One-shot "show me the methodology / results / [section]" with fuzzy match. |
@@ -41,9 +41,9 @@ identifier/topic, and Claude will pick the right tool path.
 
 ### Discover papers
 
-- *"Search ADS for galaxy cluster mass calibration with weak lensing, last 5 years."*
-- *"Find papers on tree-ring distortions in CCD photometry."*
-- *"Look for papers I already have on [topic] before going to ADS."* — forces local-first.
+- *"Search for Esteves 2023 tree rings."* — natural academic notation, just works.
+- *"Find papers on galaxy cluster mass calibration with weak lensing, last 5 years."*
+- *"Look for papers I already have on [topic] before going to the network."* — forces local-first.
 
 ### Acquire a paper into the library
 
@@ -61,7 +61,7 @@ shortcut into the current project folder, **tell the server which folder is "thi
   Claude should pass its `cwd` to `set_project_dir`.
 - *"Use `/abs/path/to/myproject` as my project folder for this session."*
 
-After that, every `get_paper` automatically creates two symlinks under `<project>/papers/`:
+After that, every `smart_fetch_paper_content` automatically creates two symlinks under `<project>/papers/`:
 - `<bibcode>/` → the source directory in the global library
 - `<FirstAuthorLastNameYear>.pdf` → the PDF for human reading (e.g. `Esteves2023.pdf`)
 
@@ -97,7 +97,7 @@ will it acquire/read the chosen subset.
 
 ### PDF-only papers
 
-If arXiv has no LaTeX source, `get_paper` downloads the PDF and runs **docling** to produce a
+If arXiv has no LaTeX source, `smart_fetch_paper_content` downloads the PDF and runs **docling** to produce a
 markdown copy. Claude reads the markdown, never the raw PDF.
 
 - *"Acquire [closed-access bibcode]; if you can't auto-download, tell me where to drop the PDF."*
@@ -161,7 +161,8 @@ uv sync
 2. Go to [Settings → API Token](https://ui.adsabs.harvard.edu/user/settings/token).
 3. Generate a key and copy it. The server reads it from `ADS_API_TOKEN`.
 
-Without a token the server still runs; ADS tools return a clear "set ADS_API_TOKEN" message.
+Without a token the server still runs — it prints a startup notice to stderr and falls back to
+the free arXiv API for discovery. Citation graphs require a token.
 
 ### Library location
 
