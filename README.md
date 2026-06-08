@@ -3,25 +3,29 @@
 ![mcp-ads-arxiv demo](demos/demo.gif)
 _A real Claude Code session — search, fetch, extract w₀/wₐ constraints, save PDF. Idle frames trimmed._
 
-A local **astrophysics paper library** as an MCP server. It discovers papers via the
-[NASA Astrophysics Data System (ADS)](https://ui.adsabs.harvard.edu/), acquires the best text
-form — **arXiv LaTeX source preferred**, otherwise a PDF converted to **markdown** — and serves
-only lightweight text to the model. **Raw PDFs are never read**; they are always converted first.
+An MCP server that makes Claude read scientific papers from their **LaTeX source code** instead
+of PDFs. It searches [NASA ADS](https://ui.adsabs.harvard.edu/) and downloads the original
+`.tex` files from arXiv — plain text that AI can read perfectly.
 
-Built for literature reviewers who want a fast, token-frugal, reusable local corpus. Works with
-**Claude Desktop and Claude Code** (and any MCP client) over stdio.
+**The problem with PDFs:** when you upload a PDF to an AI, it doesn't read text — it processes
+a rendered image. Equations get garbled (`w₀` becomes `wo` or `w0`), table values shift
+columns, and you burn tokens on figures, headers, and page numbers the AI can't even use.
+
+**The fix:** read the LaTeX source directly. Equations stay as `$w_0 = -0.82 \pm 0.05$`,
+tables keep their structure, and you only read the section you actually need — not all 40
+pages.
 
 ## Why not just upload a PDF?
 
-| Approach | Tokens for a 40-page paper | Quality |
-|----------|---------------------------|---------|
-| Upload PDF to ChatGPT/Claude | ~50,000 (full document) | OCR artifacts, broken equations, table noise |
-| This tool: read one section | ~3,000 (just what you asked) | Clean LaTeX source, intact `$w_0$`, proper tables |
-| This tool: metadata search | ~500 (title + abstract + authors) | Compressed authors, no file read at all |
+| Approach | Tokens | Quality |
+|----------|--------|---------|
+| Upload PDF to ChatGPT/Claude | ~50,000 (full document) | Image-based rendering, broken equations, shifted table values |
+| This tool: read one section | ~3,000 (just what you asked) | Clean LaTeX plain text, exact `$w_0$`, proper tables |
+| This tool: metadata only | ~500 (title + abstract + authors) | No file read at all |
 
-**~15x fewer tokens per query.** The AI reads LaTeX directly — equations render correctly,
-section boundaries are exact, and you never pay for the 35 pages you didn't need. When no
-LaTeX exists, the PDF is converted to clean markdown via docling (still better than raw OCR).
+**~15x fewer tokens per query.** You never pay for the 35 pages you didn't need.
+When no LaTeX source exists on arXiv, the PDF is converted to markdown via docling
+(still cleaner than raw PDF upload).
 
 ## What it does
 
@@ -210,28 +214,36 @@ anywhere (e.g. a shared research folder). See `.env.example`.
 
 ## Register with Claude
 
+First, set your environment variables (add these to your `~/.bashrc` or `~/.zshrc`):
+
+```bash
+export ADS_API_TOKEN="your-token-here"
+export LIT_CACHE_DIR="/path/to/your/paper/library"
+export MCP_ADS_ARXIV_DIR="/path/to/mcp-ads-arxiv"   # where you cloned the repo
+```
+
 ### Claude Code
 
 ```bash
 claude mcp add --scope user mcp-ads-arxiv \
-  -e ADS_API_TOKEN=your-token-here \
-  -e LIT_CACHE_DIR=/absolute/path/to/your/library \
-  -- uv run --directory /absolute/path/to/mcp-ads-arxiv mcp-ads-arxiv
+  -e ADS_API_TOKEN=$ADS_API_TOKEN \
+  -e LIT_CACHE_DIR=$LIT_CACHE_DIR \
+  -- uv run --directory $MCP_ADS_ARXIV_DIR mcp-ads-arxiv
 ```
 
 ### Claude Desktop
 
-Add to your Claude Desktop config:
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
 ```json
 {
   "mcpServers": {
     "mcp-ads-arxiv": {
       "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/mcp-ads-arxiv", "mcp-ads-arxiv"],
+      "args": ["run", "--directory", "/path/to/mcp-ads-arxiv", "mcp-ads-arxiv"],
       "env": {
         "ADS_API_TOKEN": "your-token-here",
-        "LIT_CACHE_DIR": "/absolute/path/to/your/library"
+        "LIT_CACHE_DIR": "/path/to/your/paper/library"
       }
     }
   }
