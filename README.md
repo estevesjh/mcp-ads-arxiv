@@ -1,5 +1,8 @@
 # mcp-ads-arxiv
 
+![mcp-ads-arxiv demo](demos/demo.gif)
+_A real Claude Code session — search, fetch, extract w₀/wₐ constraints, save PDF. Idle frames trimmed._
+
 A local **astrophysics paper library** as an MCP server. It discovers papers via the
 [NASA Astrophysics Data System (ADS)](https://ui.adsabs.harvard.edu/), acquires the best text
 form — **arXiv LaTeX source preferred**, otherwise a PDF converted to **markdown** — and serves
