@@ -11,6 +11,18 @@ only lightweight text to the model. **Raw PDFs are never read**; they are always
 Built for literature reviewers who want a fast, token-frugal, reusable local corpus. Works with
 **Claude Desktop and Claude Code** (and any MCP client) over stdio.
 
+## Why not just upload a PDF?
+
+| Approach | Tokens for a 40-page paper | Quality |
+|----------|---------------------------|---------|
+| Upload PDF to ChatGPT/Claude | ~50,000 (full document) | OCR artifacts, broken equations, table noise |
+| This tool: read one section | ~3,000 (just what you asked) | Clean LaTeX source, intact `$w_0$`, proper tables |
+| This tool: metadata search | ~500 (title + abstract + authors) | Compressed authors, no file read at all |
+
+**~15x fewer tokens per query.** The AI reads LaTeX directly — equations render correctly,
+section boundaries are exact, and you never pay for the 35 pages you didn't need. When no
+LaTeX exists, the PDF is converted to clean markdown via docling (still better than raw OCR).
+
 ## What it does
 
 - **Local-first search** over a persistent library (`literature_review.bib` + a SQLite index).
@@ -150,9 +162,33 @@ Everyday English mixes them up, so when prompting be explicit. Examples:
 
 ## Setup
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+.
+
+### Option A: using pip (most familiar)
 
 ```bash
+git clone https://github.com/estevesjh/mcp-ads-arxiv.git
+cd mcp-ads-arxiv
+pip install -e .
+```
+
+### Option B: using conda + pip
+
+```bash
+conda create -n mcp-arxiv python=3.11
+conda activate mcp-arxiv
+git clone https://github.com/estevesjh/mcp-ads-arxiv.git
+cd mcp-ads-arxiv
+pip install -e .
+```
+
+### Option C: using uv (fastest, recommended)
+
+[uv](https://docs.astral.sh/uv/) is a modern Python package manager — installs in seconds,
+no virtualenv management needed. If you haven't tried it:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # one-time install
 git clone https://github.com/estevesjh/mcp-ads-arxiv.git
 cd mcp-ads-arxiv
 uv sync
