@@ -14,9 +14,11 @@ dependencies = [
     "httpx>=0.27",
     "arxiv-to-prompt>=0.13",
     "mcp-server-ads @ git+https://github.com/cbyrohl/mcp-server-ads",
-    "docling>=2.0",
     "bibtexparser>=1.4",
 ]
+
+[project.optional-dependencies]
+pdf = ["docling>=2.0"]
 
 [project.scripts]
 mcp-ads-arxiv = "mcp_ads_arxiv.server:main"

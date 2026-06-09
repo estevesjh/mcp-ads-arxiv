@@ -14,7 +14,13 @@ from pathlib import Path
 def pdf_to_markdown(pdf_path: Path, out_path: Path) -> Path:
     """Convert a local PDF to markdown and write it to out_path. Returns out_path."""
     print(f"[convert] docling: {pdf_path.name} -> markdown ...", file=sys.stderr, flush=True)
-    from docling.document_converter import DocumentConverter
+    try:
+        from docling.document_converter import DocumentConverter
+    except ImportError:
+        raise RuntimeError(
+            "docling is not installed. Install it with: pip install 'mcp-ads-arxiv[pdf]'\n"
+            "Without docling, only papers with arXiv LaTeX source can be acquired."
+        )
 
     converter = DocumentConverter()
     result = converter.convert(str(pdf_path))
