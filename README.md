@@ -164,7 +164,14 @@ Everyday English mixes them up, so when prompting be explicit. Examples:
 
 Requires Python 3.11+.
 
-### Option A: using pip (most familiar)
+### Option A: Homebrew (macOS, recommended)
+
+```bash
+brew tap estevesjh/mcp
+brew install mcp-ads-arxiv
+```
+
+### Option B: using pip
 
 ```bash
 git clone https://github.com/estevesjh/mcp-ads-arxiv.git
@@ -172,7 +179,7 @@ cd mcp-ads-arxiv
 pip install -e .
 ```
 
-### Option B: using conda + pip
+### Option C: using conda + pip
 
 ```bash
 conda create -n mcp-arxiv python=3.11
@@ -182,10 +189,10 @@ cd mcp-ads-arxiv
 pip install -e .
 ```
 
-### Option C: using uv (fastest, recommended)
+### Option D: using uv (fastest)
 
 [uv](https://docs.astral.sh/uv/) is a modern Python package manager — installs in seconds,
-no virtualenv management needed. If you haven't tried it:
+no virtualenv management needed:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # one-time install
@@ -193,6 +200,17 @@ git clone https://github.com/estevesjh/mcp-ads-arxiv.git
 cd mcp-ads-arxiv
 uv sync
 ```
+
+### Optional: PDF conversion support
+
+Most arXiv papers have LaTeX source and don't need this. For PDF-only papers
+(no `.tex` on arXiv), install docling:
+
+```bash
+pip install 'mcp-ads-arxiv[pdf]'
+```
+
+This adds ~1GB (includes torch). Skip it if you only work with arXiv preprints.
 
 ### Get an ADS API token
 
