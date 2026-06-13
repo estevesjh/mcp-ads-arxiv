@@ -13,6 +13,7 @@ from fastmcp import FastMCP
 
 from . import acquire as _acquire
 from . import ads, bib, cache, config, sections as _sections, survey, tokens
+from .latexclean import clean_latex
 
 mcp = FastMCP("mcp-ads-arxiv")
 
@@ -223,7 +224,7 @@ def _list_sections_payload(paper: dict[str, Any]) -> dict[str, Any] | None:
 
         text = open(paper["tex_path"], encoding="utf-8").read()
         raw = _list_tex(text)
-        abstract = extract_abstract(text) or ""
+        abstract = clean_latex(extract_abstract(text) or "")
         result = {
             "format": "latex",
             "sections": [{"label": _sections.display_label(h), "raw": h} for h in raw],
@@ -286,7 +287,7 @@ def read_topic(identifier: str, topic: str) -> dict[str, Any]:
         full_text = open(paper["tex_path"], encoding="utf-8").read()
 
         if topic.strip().lower() == "abstract":
-            text = extract_abstract(full_text) or ""
+            text = clean_latex(extract_abstract(full_text) or "")
             cost = tokens.measure(text, full_text=full_text)
             return {"key": paper["key"], "topic": topic, "matched_sections": ["abstract"],
                     "text": text, **cost}
@@ -300,7 +301,7 @@ def read_topic(identifier: str, topic: str) -> dict[str, Any]:
                 "hint": "no section matched; ask the user which label to use, or pass it "
                         "to read_paper(sections=[...]).",
             }
-        chosen = "\n\n".join(_sections.extract_by_raw_name(full_text, h) for h in hits)
+        chosen = clean_latex("\n\n".join(_sections.extract_by_raw_name(full_text, h) for h in hits))
         cost = tokens.measure(chosen, full_text=full_text)
         return {
             "key": paper["key"], "topic": topic,
@@ -365,7 +366,7 @@ def read_paper(identifier: str, sections: list[str] | None = None,
                     resolved.append(hit)
                 else:
                     unresolved.append(s)
-            chosen = "\n\n".join(_sections.extract_by_raw_name(full_text, r) for r in resolved)
+            chosen = clean_latex("\n\n".join(_sections.extract_by_raw_name(full_text, r) for r in resolved))
             cost = tokens.measure(chosen, full_text=full_text)
             return {
                 "key": paper["key"], "format": "latex",
@@ -374,9 +375,10 @@ def read_paper(identifier: str, sections: list[str] | None = None,
                 "sections_unmatched": unresolved,
                 "text": chosen, **cost,
             }
-        cost = tokens.measure(full_text)
+        cleaned = clean_latex(full_text)
+        cost = tokens.measure(cleaned, full_text=full_text)
         return {"key": paper["key"], "format": "latex",
-                "sections_available": _list_tex(full_text), "text": full_text, **cost}
+                "sections_available": _list_tex(full_text), "text": cleaned, **cost}
 
     if state == "md" and paper.get("md_path"):
         full_text = open(paper["md_path"], encoding="utf-8").read()
