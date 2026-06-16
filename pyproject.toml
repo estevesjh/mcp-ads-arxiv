@@ -8,7 +8,7 @@ authors = [
     { name = "estevesjh", email = "johnny.udi@gmail.com" }
 ]
 requires-python = ">=3.11"
-keywords = ["mcp", "nasa", "ads", "arxiv", "astrophysics", "literature-review", "docling"]
+keywords = ["mcp", "mcp-server", "model-context-protocol", "nasa", "ads", "arxiv", "astrophysics", "literature-review", "claude", "research", "papers", "latex", "python", "docling"]
 dependencies = [
     "fastmcp>=2.0,<4.0",
     "httpx>=0.27",

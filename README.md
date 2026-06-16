@@ -1,5 +1,9 @@
 # mcp-ads-arxiv
 
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Homebrew](https://img.shields.io/badge/homebrew-mcp--ads--arxiv-orange.svg)](https://github.com/estevesjh/homebrew-mcp)
+
 ![mcp-ads-arxiv demo](demos/demo.gif)
 _A real Claude Code session — search, fetch, extract w₀/wₐ constraints, save PDF. Idle frames trimmed._
 
@@ -26,6 +30,22 @@ pages.
 **~15x fewer tokens per query.** You never pay for the 35 pages you didn't need.
 When no LaTeX source exists on arXiv, the PDF is converted to markdown via docling
 (still cleaner than raw PDF upload).
+
+## Quick Start
+
+### Homebrew (macOS, recommended)
+```bash
+brew tap estevesjh/mcp
+brew install mcp-ads-arxiv
+```
+
+### pip
+```bash
+git clone https://github.com/estevesjh/mcp-ads-arxiv.git
+cd mcp-ads-arxiv && pip install -e .
+```
+
+See [Setup](#setup) below for conda, uv, PDF conversion, environment variables, and Claude registration.
 
 ## What it does
 
