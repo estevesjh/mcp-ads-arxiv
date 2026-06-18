@@ -102,7 +102,7 @@ def compile_ara(
     model_arg = model or os.environ.get("ARA_COMPILER_MODEL", "sonnet")
 
     try:
-        result = _run_claude_code(prompt, model=model_arg, max_tokens=max_tokens)
+        result = _run_claude_code(prompt, model=model_arg, max_tokens=max_tokens, cwd=str(output))
     except Exception as exc:
         return {"error": f"Compilation failed: {exc}", "key": key}
 
@@ -135,41 +135,47 @@ def _find_bib(key: str) -> str | None:
     return None
 
 
-def _run_claude_code(prompt: str, *, model: str, max_tokens: int) -> str:
+def _run_claude_code(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
     """Spawn claude CLI as a subprocess to run the compiler agent.
 
     Uses `claude` CLI with --print flag for non-interactive execution.
     Falls back to Claude Code SDK Python API if available.
     """
     try:
-        return _run_via_sdk(prompt, model=model, max_tokens=max_tokens)
+        return _run_via_sdk(prompt, model=model, max_tokens=max_tokens, cwd=cwd)
     except ImportError:
         pass
 
-    return _run_via_cli(prompt, model=model, max_tokens=max_tokens)
+    return _run_via_cli(prompt, model=model, max_tokens=max_tokens, cwd=cwd)
 
 
-def _run_via_sdk(prompt: str, *, model: str, max_tokens: int) -> str:
+def _run_via_sdk(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
     """Run via claude-code-sdk Python package."""
-    from claude_code_sdk import Claude, ClaudeCodeOptions
+    from claude_code_sdk import ClaudeCodeOptions, query, ResultMessage, AssistantMessage
 
     options = ClaudeCodeOptions(
         model=model,
         max_turns=50,
+        permission_mode="bypassPermissions",
+        allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        cwd=cwd,
     )
     import asyncio
 
     async def _run():
         result_parts = []
-        async for event in Claude.code(prompt=prompt, options=options):
-            if hasattr(event, "content"):
-                result_parts.append(str(event.content))
+        async for msg in query(prompt=prompt, options=options):
+            if isinstance(msg, (ResultMessage, AssistantMessage)):
+                if hasattr(msg, "content"):
+                    for block in msg.content:
+                        if hasattr(block, "text"):
+                            result_parts.append(block.text)
         return "\n".join(result_parts)
 
     return asyncio.run(_run())
 
 
-def _run_via_cli(prompt: str, *, model: str, max_tokens: int) -> str:
+def _run_via_cli(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
     """Run via claude CLI subprocess."""
     cmd = [
         "claude",
@@ -187,6 +193,7 @@ def _run_via_cli(prompt: str, *, model: str, max_tokens: int) -> str:
         capture_output=True,
         text=True,
         timeout=600,
+        cwd=cwd,
         env={**os.environ, "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_tokens)},
     )
 

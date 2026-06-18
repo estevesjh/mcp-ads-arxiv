@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["docling>=2.0"]
-ara = ["claude-code-sdk>=0.1"]
+ara = ["claude-code-sdk>=0.0.1"]
 
 [project.scripts]
 mcp-ads-arxiv = "mcp_ads_arxiv.server:main"
