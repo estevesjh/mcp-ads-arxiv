@@ -87,7 +87,11 @@ def fetch_pdf(paper: dict, project_dir: str | None = None) -> dict:
 
 
 def fetch_tex(arxiv_id: str, key: str) -> Path | None:
-    """Download + flatten arXiv LaTeX source into library/<key>/source.tex."""
+    """Download + flatten arXiv LaTeX source into library/<key>/source.tex.
+
+    Also copies image files (.eps/.pdf/.png/.jpg) to library/<key>/figures/
+    and .bib/.bbl files to library/<key>/ for ARA compilation.
+    """
     from arxiv_to_prompt import process_latex_source
 
     print(f"[acquire] arXiv LaTeX source for {arxiv_id} ...", file=sys.stderr, flush=True)
@@ -101,7 +105,54 @@ def fetch_tex(arxiv_id: str, key: str) -> Path | None:
     out = config.paper_dir(key) / "source.tex"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(latex, encoding="utf-8")
+
+    _copy_source_assets(arxiv_id, key)
     return out
+
+
+def _copy_source_assets(arxiv_id: str, key: str) -> None:
+    """Copy image and bib files from arxiv cache to library/<key>/."""
+    import shutil
+
+    from arxiv_to_prompt import process_latex_source
+
+    try:
+        figure_paths_raw = process_latex_source(arxiv_id, figure_paths_only=True, use_cache=True)
+    except Exception:
+        figure_paths_raw = None
+
+    paper_d = config.paper_dir(key)
+    image_exts = {".eps", ".pdf", ".png", ".jpg", ".jpeg", ".svg"}
+
+    if figure_paths_raw:
+        figures_dir = paper_d / "figures"
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        for line in figure_paths_raw.strip().splitlines():
+            p = Path(line.strip())
+            if p.exists() and p.suffix.lower() in image_exts:
+                dest = figures_dir / p.name
+                if not dest.exists():
+                    shutil.copy2(p, dest)
+
+    # Also copy bib/bbl from the cache directory
+    try:
+        from arxiv_to_prompt import get_default_cache_dir
+        base = get_default_cache_dir()
+        # Try multiple naming patterns
+        candidates = [
+            base / arxiv_id,
+            base / arxiv_id.replace("/", "_"),
+        ]
+        for cache_dir in candidates:
+            if cache_dir.exists():
+                for ext in ("*.bib", "*.bbl"):
+                    for bib_file in cache_dir.glob(ext):
+                        dest = paper_d / bib_file.name
+                        if not dest.exists():
+                            shutil.copy2(bib_file, dest)
+                break
+    except (ImportError, Exception):
+        pass
 
 
 def acquire(paper: dict) -> dict:

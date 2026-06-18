@@ -31,13 +31,28 @@ def is_compiled(key: str) -> bool:
     return (d / "PAPER.md").exists()
 
 
-def _build_compiler_prompt(tex_path: str, output_dir: str, bib_path: str | None = None) -> str:
+def _build_compiler_prompt(
+    tex_path: str,
+    output_dir: str,
+    bib_path: str | None = None,
+    figures_dir: str | None = None,
+) -> str:
     """Build the prompt that drives the compiler agent."""
     skill_text = SKILL_PATH.read_text(encoding="utf-8")
+
+    # Resolve ${CLAUDE_SKILL_DIR} to real path so agent can Read reference files
+    skill_dir = str(SKILL_PATH.parent)
+    skill_text = skill_text.replace("${CLAUDE_SKILL_DIR}", skill_dir)
+
+    # Strip 'Task' from allowed-tools (we don't provide it)
+    skill_text = skill_text.replace(", Task", "")
 
     sources = f"- LaTeX source: {tex_path}"
     if bib_path and Path(bib_path).exists():
         sources += f"\n- Bibliography: {bib_path}"
+    if figures_dir and Path(figures_dir).exists():
+        figs = list(Path(figures_dir).iterdir())
+        sources += f"\n- Figures directory: {figures_dir} ({len(figs)} files)"
 
     return f"""{skill_text}
 
@@ -94,7 +109,8 @@ async def compile_ara_async(
     output.mkdir(parents=True, exist_ok=True)
 
     bib_path = _find_bib(key)
-    prompt = _build_compiler_prompt(tex_path, str(output), bib_path)
+    figures_dir = _find_figures_dir(key)
+    prompt = _build_compiler_prompt(tex_path, str(output), bib_path, figures_dir)
     model_arg = model or os.environ.get("ARA_COMPILER_MODEL", "sonnet")
 
     try:
@@ -153,7 +169,8 @@ def compile_ara(
     output.mkdir(parents=True, exist_ok=True)
 
     bib_path = _find_bib(key)
-    prompt = _build_compiler_prompt(tex_path, str(output), bib_path)
+    figures_dir = _find_figures_dir(key)
+    prompt = _build_compiler_prompt(tex_path, str(output), bib_path, figures_dir)
 
     model_arg = model or os.environ.get("ARA_COMPILER_MODEL", "sonnet")
 
@@ -182,12 +199,20 @@ def compile_ara(
 def _find_bib(key: str) -> str | None:
     """Look for a .bib file near the paper's source."""
     paper_d = config.paper_dir(key)
-    bibs = list(paper_d.glob("*.bib"))
+    bibs = list(paper_d.glob("*.bib")) + list(paper_d.glob("*.bbl"))
     if bibs:
         return str(bibs[0])
     global_bib = config.bib_path()
     if global_bib.exists():
         return str(global_bib)
+    return None
+
+
+def _find_figures_dir(key: str) -> str | None:
+    """Return the figures directory for a paper, if it exists."""
+    figs = config.paper_dir(key) / "figures"
+    if figs.exists() and any(figs.iterdir()):
+        return str(figs)
     return None
 
 
@@ -208,7 +233,7 @@ async def _run_via_sdk_async(prompt: str, *, model: str, max_tokens: int, cwd: s
         model=model,
         max_turns=50,
         permission_mode="bypassPermissions",
-        allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task"],
         cwd=cwd,
     )
 
@@ -229,7 +254,7 @@ def _run_via_cli(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
         "--print",
         "--model", model,
         "--max-turns", "50",
-        "--allowedTools", "Read,Write,Edit,Bash(python *),Bash(ls *),Bash(mkdir *),Glob,Grep",
+        "--allowedTools", "Read,Write,Edit,Bash,Glob,Grep",
         "-p", prompt,
     ]
 
