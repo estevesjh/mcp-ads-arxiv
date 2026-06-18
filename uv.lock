@@ -1390,10 +1390,14 @@ source = { editable = "." }
 dependencies = [
     { name = "arxiv-to-prompt" },
     { name = "bibtexparser" },
-    { name = "docling" },
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "mcp-server-ads" },
+]
+
+[package.optional-dependencies]
+pdf = [
+    { name = "docling" },
 ]
 
 [package.dev-dependencies]
@@ -1406,11 +1410,12 @@ dev = [
 requires-dist = [
     { name = "arxiv-to-prompt", specifier = ">=0.13" },
     { name = "bibtexparser", specifier = ">=1.4" },
-    { name = "docling", specifier = ">=2.0" },
+    { name = "docling", marker = "extra == 'pdf'", specifier = ">=2.0" },
     { name = "fastmcp", specifier = ">=2.0,<4.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mcp-server-ads", git = "https://github.com/cbyrohl/mcp-server-ads" },
 ]
+provides-extras = ["pdf"]
 
 [package.metadata.requires-dev]
 dev = [

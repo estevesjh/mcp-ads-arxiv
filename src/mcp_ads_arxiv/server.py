@@ -12,7 +12,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from . import acquire as _acquire
-from . import ads, bib, cache, config, sections as _sections, survey, tokens
+from . import ads, ara as _ara, bib, cache, config, sections as _sections, survey, tokens
 from .latexclean import clean_latex
 
 mcp = FastMCP("mcp-ads-arxiv")
@@ -388,6 +388,55 @@ def read_paper(identifier: str, sections: list[str] | None = None,
                 "text": text, **cost}
 
     return {"error": f"{identifier!r} has no servable text yet (state={state}). Call smart_fetch_paper_content."}
+
+
+@mcp.tool
+def compile_to_ara(identifier: str, model: str | None = None) -> dict[str, Any]:
+    """Compile an acquired paper's LaTeX source into an Agent-Native Research Artifact (ARA).
+
+    An ARA is a structured, machine-executable knowledge package with layers:
+    - logic/ (claims, experiments, concepts, problem, solution)
+    - src/ (configs, environment, code stubs)
+    - trace/ (exploration tree with dead ends and decisions)
+    - evidence/ (tables, figures, proofs)
+
+    Requires the paper to be in state=tex (arXiv LaTeX source acquired). Uses the Claude
+    Code SDK to spawn a compiler agent. Takes 1-3 minutes and ~50-100k tokens.
+
+    Pass model= to override the compiler agent model (default: sonnet, or ARA_COMPILER_MODEL
+    env var). After compilation, use read_ara() to access structured layers."""
+    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+    if paper is None:
+        return {"error": f"{identifier!r} is not in the library. Call smart_fetch_paper_content first."}
+    return _ara.compile_ara(paper["key"], model=model)
+
+
+@mcp.tool
+def read_ara(identifier: str, layer: str = "paper") -> dict[str, Any]:
+    """Read a specific layer from a compiled ARA artifact.
+
+    Available layers:
+      paper        - PAPER.md root manifest + layer index (start here)
+      claims       - Falsifiable assertions with proof pointers
+      problem      - Observations → gaps → key insight
+      experiments  - Declarative verification plans
+      concepts     - Key technical terms
+      related_work - Typed dependency graph
+      constraints  - Boundary conditions + assumptions
+      heuristics   - Implementation tricks with sensitivity ratings
+      architecture - System/model architecture (if present)
+      algorithm    - Algorithm specification (if present)
+      method       - Method description (if present)
+      exploration  - Research DAG (YAML tree of decisions + dead ends)
+      evidence     - Evidence index mapping files to claims
+      environment  - Data/software/hardware/seeds
+      all_files    - List all files in the ARA (no content)
+
+    You can also pass a relative path directly (e.g. 'logic/solution/heuristics.md')."""
+    paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
+    if paper is None:
+        return {"error": f"{identifier!r} is not in the library. Call smart_fetch_paper_content first."}
+    return _ara.read_ara_layer(paper["key"], layer)
 
 
 @mcp.tool

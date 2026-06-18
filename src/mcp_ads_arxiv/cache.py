@@ -26,7 +26,7 @@ from typing import Any, Iterator
 from . import authors as _authors
 from . import config
 
-STATES = ("metadata", "pdf_only", "md", "tex")
+STATES = ("metadata", "pdf_only", "md", "tex", "ara")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS papers (
     state     TEXT NOT NULL DEFAULT 'metadata',
     tex_path  TEXT,
     md_path   TEXT,
-    pdf_path  TEXT
+    pdf_path  TEXT,
+    ara_path  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_papers_bibcode  ON papers(bibcode);
 CREATE INDEX IF NOT EXISTS idx_papers_arxiv_id ON papers(arxiv_id);
@@ -67,6 +68,10 @@ CREATE TABLE IF NOT EXISTS token_usage (
 );
 INSERT OR IGNORE INTO token_usage (id) VALUES (1);
 """
+
+_MIGRATIONS = [
+    "ALTER TABLE papers ADD COLUMN ara_path TEXT;",
+]
 
 _LIST_FIELDS = {"keywords", "authors"}
 
@@ -100,10 +105,23 @@ class Library:
         conn.row_factory = sqlite3.Row
         try:
             conn.executescript(_SCHEMA)
+            self._apply_migrations(conn)
             yield conn
             conn.commit()
         finally:
             conn.close()
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        """Apply schema migrations for existing databases (idempotent)."""
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
+        for stmt in _MIGRATIONS:
+            col = stmt.split("ADD COLUMN")[1].strip().split()[0] if "ADD COLUMN" in stmt else None
+            if col and col in cols:
+                continue
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
 
     # --- raw access (internal; full fidelity) -------------------------------
 
@@ -139,6 +157,7 @@ class Library:
         columns = (
             "key", "bibcode", "arxiv_id", "doi", "title", "abstract",
             "keywords", "authors", "year", "state", "tex_path", "md_path", "pdf_path",
+            "ara_path",
         )
         incoming = {k: paper[k] for k in columns if k in paper}
         for f in _LIST_FIELDS:
@@ -172,7 +191,7 @@ class Library:
         """Advance a paper's state and optionally record tex_path/md_path/pdf_path."""
         if state not in STATES:
             raise ValueError(f"invalid state {state!r}; expected one of {STATES}")
-        allowed = {k: v for k, v in paths.items() if k in ("tex_path", "md_path", "pdf_path")}
+        allowed = {k: v for k, v in paths.items() if k in ("tex_path", "md_path", "pdf_path", "ara_path")}
         assignments = ", ".join(["state = ?", *[f"{k} = ?" for k in allowed]])
         with self.connect() as conn:
             conn.execute(

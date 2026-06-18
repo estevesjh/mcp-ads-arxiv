@@ -74,6 +74,31 @@ options before reading any full text.
 2. PDF download (ADS link_gateway / arXiv) → docling → markdown.
 3. If neither works: drop a PDF into `inbox/`, then call `ingest_inbox`.
 
+## ARA Compilation (Agent-Native Research Artifact)
+
+State progression: `metadata → tex → ara`
+
+When the user wants deep structured access to a paper (reproduction, extension, systematic
+knowledge extraction), compile it to ARA:
+
+| User asks | Tool | Notes |
+|---|---|---|
+| "compile this paper to ARA" / "structure this paper" | `compile_to_ara(identifier)` | Spawns compiler agent, ~1-3 min |
+| "show me the claims / experiments / exploration tree" | `read_ara(identifier, layer="claims")` | After compilation |
+| "what files are in the ARA?" | `read_ara(identifier, layer="all_files")` | Lists structure |
+
+**When to suggest ARA compilation:**
+- User wants to reproduce experiments → ARA has structured experiment plans
+- User wants to understand dead ends / design decisions → ARA has exploration tree
+- User needs precise hyperparameters / configs → ARA centralizes them
+- User is building on / extending the paper → ARA has executable specs
+
+**Do NOT auto-compile.** ARA compilation costs ~50-100k tokens. Only compile when the user
+explicitly asks, or suggest it when structured access would clearly help.
+
+`read_ara` layers: paper, claims, problem, experiments, concepts, related_work, constraints,
+heuristics, architecture, algorithm, method, exploration, evidence, environment, all_files.
+
 ## Reading protocol — prefer one-shot tools, never read the whole paper to find a section
 
 Routing table for "show me X of paper Y" workflows:
