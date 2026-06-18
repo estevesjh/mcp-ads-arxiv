@@ -391,7 +391,7 @@ def read_paper(identifier: str, sections: list[str] | None = None,
 
 
 @mcp.tool
-def compile_to_ara(identifier: str, model: str | None = None) -> dict[str, Any]:
+async def compile_to_ara(identifier: str, model: str | None = None) -> dict[str, Any]:
     """Compile an acquired paper's LaTeX source into an Agent-Native Research Artifact (ARA).
 
     An ARA is a structured, machine-executable knowledge package with layers:
@@ -408,7 +408,7 @@ def compile_to_ara(identifier: str, model: str | None = None) -> dict[str, Any]:
     paper = cache.get(identifier) or cache.find_by(bibcode=identifier, arxiv_id=identifier)
     if paper is None:
         return {"error": f"{identifier!r} is not in the library. Call smart_fetch_paper_content first."}
-    return _ara.compile_ara(paper["key"], model=model)
+    return await _ara.compile_ara_async(paper["key"], model=model)
 
 
 @mcp.tool

@@ -65,6 +65,62 @@ Begin by reading the source file, then proceed through the stages.
 """
 
 
+async def compile_ara_async(
+    key: str,
+    *,
+    model: str | None = None,
+    max_tokens: int = 200_000,
+) -> dict[str, Any]:
+    """Async version of compile_ara — uses SDK directly inside event loop."""
+    paper = cache.get(key)
+    if paper is None:
+        return {"error": f"{key!r} not in library."}
+
+    state = paper.get("state")
+    tex_path = paper.get("tex_path")
+
+    if state not in ("tex", "ara") or not tex_path or not Path(tex_path).exists():
+        return {"error": f"{key!r} has no LaTeX source (state={state}). Need state=tex."}
+
+    if is_compiled(key):
+        return {
+            "key": key,
+            "state": "ara",
+            "path": str(ara_dir(key)),
+            "already_compiled": True,
+        }
+
+    output = ara_dir(key)
+    output.mkdir(parents=True, exist_ok=True)
+
+    bib_path = _find_bib(key)
+    prompt = _build_compiler_prompt(tex_path, str(output), bib_path)
+    model_arg = model or os.environ.get("ARA_COMPILER_MODEL", "sonnet")
+
+    try:
+        result = await _run_via_sdk_async(prompt, model=model_arg, max_tokens=max_tokens, cwd=str(output))
+    except ImportError:
+        result = _run_via_cli(prompt, model=model_arg, max_tokens=max_tokens, cwd=str(output))
+    except Exception as exc:
+        return {"error": f"Compilation failed: {exc}", "key": key}
+
+    if (output / "PAPER.md").exists():
+        cache.set_state(key, "ara", ara_path=str(output))
+        return {
+            "key": key,
+            "state": "ara",
+            "path": str(output),
+            "files": _list_ara_files(output),
+        }
+    else:
+        return {
+            "error": "Compilation produced no PAPER.md — likely incomplete.",
+            "key": key,
+            "output_dir": str(output),
+            "agent_output": result[:2000] if result else None,
+        }
+
+
 def compile_ara(
     key: str,
     *,
@@ -138,19 +194,14 @@ def _find_bib(key: str) -> str | None:
 def _run_claude_code(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
     """Spawn claude CLI as a subprocess to run the compiler agent.
 
-    Uses `claude` CLI with --print flag for non-interactive execution.
-    Falls back to Claude Code SDK Python API if available.
+    Prefers CLI (subprocess) for reliability inside async MCP servers.
+    Falls back to SDK only when called outside an event loop.
     """
-    try:
-        return _run_via_sdk(prompt, model=model, max_tokens=max_tokens, cwd=cwd)
-    except ImportError:
-        pass
-
     return _run_via_cli(prompt, model=model, max_tokens=max_tokens, cwd=cwd)
 
 
-def _run_via_sdk(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
-    """Run via claude-code-sdk Python package."""
+async def _run_via_sdk_async(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
+    """Run via claude-code-sdk Python package (async, for use inside event loops)."""
     from claude_code_sdk import ClaudeCodeOptions, query, ResultMessage, AssistantMessage
 
     options = ClaudeCodeOptions(
@@ -160,19 +211,15 @@ def _run_via_sdk(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
         allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
         cwd=cwd,
     )
-    import asyncio
 
-    async def _run():
-        result_parts = []
-        async for msg in query(prompt=prompt, options=options):
-            if isinstance(msg, (ResultMessage, AssistantMessage)):
-                if hasattr(msg, "content"):
-                    for block in msg.content:
-                        if hasattr(block, "text"):
-                            result_parts.append(block.text)
-        return "\n".join(result_parts)
-
-    return asyncio.run(_run())
+    result_parts = []
+    async for msg in query(prompt=prompt, options=options):
+        if isinstance(msg, (ResultMessage, AssistantMessage)):
+            if hasattr(msg, "content"):
+                for block in msg.content:
+                    if hasattr(block, "text"):
+                        result_parts.append(block.text)
+    return "\n".join(result_parts)
 
 
 def _run_via_cli(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
@@ -192,7 +239,7 @@ def _run_via_cli(prompt: str, *, model: str, max_tokens: int, cwd: str) -> str:
         cmd,
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=900,
         cwd=cwd,
         env={**os.environ, "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_tokens)},
     )
