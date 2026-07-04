@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/estevesjh-mcp-ads-arxiv-badge.png)](https://mseep.ai/app/estevesjh-mcp-ads-arxiv)
+
 # mcp-ads-arxiv
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
